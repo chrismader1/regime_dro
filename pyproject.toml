@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regime_dro"
+version = "0.1.0"
+description = "Distributionally Robust Portfolio Optimization with Wasserstein ambiguity sets under regime-switching dynamics."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Chris Mader", email = "cmader2@jh.edu" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "cvxpy",
+    "pyarrow",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x>=13.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/chrismader1/regime_dro"
+
+[tool.setuptools.packages.find]
+include = ["regime_dro*"]
