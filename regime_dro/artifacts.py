@@ -140,15 +140,16 @@ def available_cfg_tuples_from_parquet(seg_parq: str):
 
 def permissible_tuples_from_CONFIG(CONFIG):
     """
-    Build all permissible (config, n_regimes, dim_latent) tuples from CONFIG["RSLDS"].
-    """
-    lst = CONFIG.get("RSLDS", [])
+    Build all permissible (config, n_regimes, dim_latent) tuples from CONFIG["MODELS"].
+    """    
+    lst = CONFIG.get("MODELS", [])
     if not isinstance(lst, (list, tuple)) or len(lst) == 0:
-        raise ValueError("CONFIG['RSLDS'] must be a non-empty list of dicts.")
+        raise ValueError("CONFIG['MODELS'] must be a non-empty list of dicts.")
     out = []
     for x in lst:
         if not isinstance(x, dict) or not all(k in x for k in ("config", "n_regimes", "dim_latent")):
-            raise ValueError("Each RSLDS entry must be a dict with keys: config, n_regimes, dim_latent.")
+            raise ValueError("Each MODELS entry must be a dict with keys: config, n_regimes, dim_latent.")
+        
         out.append((str(x["config"]).strip(), int(x["n_regimes"]), int(x["dim_latent"])))
     return out
 

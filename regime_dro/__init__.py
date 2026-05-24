@@ -93,6 +93,7 @@ from regime_dro.context import (
     gross_exp_on_window,
     make_index_rebal,
     make_index_union,
+    make_index_regdro_periodic,
     expand_daily_weights,
     pnl_with_delay_and_cost,
     period_ends,

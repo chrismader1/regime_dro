@@ -39,9 +39,9 @@ def run_regdro(prices_df: pd.DataFrame, CONFIG: dict, verbose: bool = True) -> d
         (source it from Bloomberg, Yahoo, CSV, etc.).
     CONFIG : dict
         Required keys:
-          - RSLDS              : list of {'config', 'n_regimes', 'dim_latent'} dicts (permissible tuples)
+          - MODELS             : list of {'config', 'n_regimes', 'dim_latent'} dicts (permissible tuples)
           - DATA               : {'start_dt', 'end_dt'}
-          - REBAL              : {'min_lookback_days', 'max_lookback_days'}
+          - REBAL              : {'min_lookback', 'max_lookback', 'rebalance_period', 'freq', 'regdro_rebal_method'}
           - PORTFOLIO          : risk_budget, risk_free_rate, epsilon_sigma, sigma_shrinkage_lambda,
                                  delta_name, no_shorting, no_leverage, max_cash, max_pos_size
           - EXECUTION          : {'execution_delay', 'trading_cost'}
@@ -90,7 +90,7 @@ def run_regdro(prices_df: pd.DataFrame, CONFIG: dict, verbose: bool = True) -> d
 
     i_start = idx.get_indexer([s_dt], method="nearest")[0]
     i_end   = idx.get_indexer([e_dt], method="nearest")[0]
-    i_hist  = max(0, i_start - int(CONFIG["REBAL"]["max_lookback_days"]))
+    i_hist  = max(0, i_start - int(CONFIG["REBAL"]["max_lookback"]))
 
     df_raw_slice_hist = df_raw.iloc[i_hist : i_end + 1]
     if df_raw_slice_hist.shape[0] < 2:
@@ -108,8 +108,8 @@ def run_regdro(prices_df: pd.DataFrame, CONFIG: dict, verbose: bool = True) -> d
 
     # Solver params
     lam    = float(CONFIG["PORTFOLIO"]["sigma_shrinkage_lambda"])
-    min_lb = int(CONFIG["REBAL"]["min_lookback_days"])
-    max_lb = int(CONFIG["REBAL"]["max_lookback_days"])
+    min_lb = int(CONFIG["REBAL"]["min_lookback"])
+    max_lb = int(CONFIG["REBAL"]["max_lookback"])
     AF     = int(CONFIG.get("annualization_factor", 252))
 
     # rSLDS labels on OOS + FIT calendars
@@ -149,10 +149,18 @@ def run_regdro(prices_df: pd.DataFrame, CONFIG: dict, verbose: bool = True) -> d
     if not names_all:
         raise RuntimeError("No assets produced regime labels → cannot run RegDRO.")
 
-    # Event-based dates: union of regime changes
-    _, taus = make_index_union(full_index, {k: np.asarray(v, float) for k, v in Z_labels.items()}, s, e)
+    # Build rebalance schedule: periodic (default) or regime_change (legacy)
+    method = str(CONFIG["REBAL"].get("regdro_rebal_method", "periodic"))
+    if method == "periodic":
+        rebal_period = int(CONFIG["REBAL"]["rebalance_period"])
+        freq         = str(CONFIG["REBAL"]["freq"])
+        _, taus = make_index_regdro_periodic(full_index, s, e, rebal_period, freq)
+    elif method == "regime_change":
+        _, taus = make_index_union(full_index, {k: np.asarray(v, float) for k, v in Z_labels.items()}, s, e)
+    else:
+        raise ValueError(f"REBAL.regdro_rebal_method must be 'periodic' or 'regime_change', got {method!r}")
     taus = [int(x) for x in taus]
-
+    
     params_reg = dict(CONFIG["DELTA_DEFAULTS"][CONFIG["PORTFOLIO"]["delta_name"]])
 
     # Solve RegDRO at each regime-change date

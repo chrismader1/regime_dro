@@ -120,22 +120,31 @@ def make_index_rebal(
     intersection_index: pd.DatetimeIndex,
     start_dt,
     end_dt,
-    rebalance_period_days: int,
+    rebalance_period: int,
+    freq: str,
 ):
-    """Fixed-period rebalancing dates on the INTERSECTION calendar (MVO/DRO)."""
+    """Fixed-period rebalancing dates on the INTERSECTION calendar.
+    Builds a target grid at `freq` (e.g. "B", "W-FRI", "M"), takes every
+    `rebalance_period`-th point, then snaps each target date to the last
+    available date on `intersection_index` that is <= the target."""
     idx_req = pd.DatetimeIndex(
         pd.Series(True, index=intersection_index).loc[start_dt:end_dt].index
     )
     if len(idx_req) == 0:
         return idx_req, [0, 0]
-    k = int(max(1, rebalance_period_days))
-    take = np.arange(0, len(idx_req), k, dtype=int)
-    idx_rebal = idx_req.take(take)
-    if (len(idx_rebal) == 0) or (idx_rebal[-1] != idx_req[-1]):
-        idx_rebal = idx_rebal.append(idx_req[-1:])
-    pos = intersection_index.get_indexer(idx_rebal)
+    target_grid = pd.date_range(start=idx_req[0], end=idx_req[-1], freq=freq)
+    if len(target_grid) == 0:
+        target_grid = pd.DatetimeIndex([idx_req[-1]])
+    k = int(max(1, rebalance_period))
+    take = np.arange(0, len(target_grid), k, dtype=int)
+    targets = target_grid.take(take)
+    if (len(targets) == 0) or (targets[-1] != target_grid[-1]):
+        targets = targets.append(target_grid[-1:])
+    pos = intersection_index.get_indexer(targets, method="pad")
     pos = [p for p in pos if p >= 0]
-    marks = sorted(set([0] + pos + [len(intersection_index)]))
+    idx_rebal = intersection_index.take(sorted(set(pos)))
+    pos_full = intersection_index.get_indexer(idx_rebal)
+    marks = sorted(set([0] + [int(p) for p in pos_full if p >= 0] + [len(intersection_index)]))
     return pd.DatetimeIndex(idx_rebal), marks
 
 
@@ -173,6 +182,18 @@ def make_index_union(
         taus = sorted(set([0] + pos + [T]))
 
     return index_union, taus
+
+
+def make_index_regdro_periodic(
+    intersection_index: pd.DatetimeIndex,
+    start_dt,
+    end_dt,
+    rebalance_period: int,
+    freq: str,
+):
+    """Periodic rebalancing dates for RegDRO. Identical schedule to make_index_rebal;
+    regime lookup happens per-rebalance-date in the pipeline."""
+    return make_index_rebal(intersection_index, start_dt, end_dt, rebalance_period, freq)
 
 
 def expand_daily_weights(weights_on_dates: pd.DataFrame, full_index: pd.DatetimeIndex) -> pd.DataFrame:

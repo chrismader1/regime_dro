@@ -1,6 +1,7 @@
 # evaluate.py
 
 import numpy as np
+import pandas as pd
 
 from regime_dro.arrays import asnumpy_strict, asxp, _to_xp
 from regime_dro.optimizer import psd_factor_LtL
@@ -12,6 +13,10 @@ except Exception:
     import numpy as xp
     GPU = False
 
+
+# =============================================================================
+# Existing core stats (unchanged)
+# =============================================================================
 
 def stats_from_series(port_daily, config):
     AF = int(config.get("annualization_factor", 252))
@@ -207,3 +212,248 @@ def evaluate_regime_independently(fit, data, G):
         stats_oos[f"gross_exp_k{k+1}"] = gross_exp_seg
 
     return stats_oos
+
+
+# =============================================================================
+# Extended portfolio analytics
+# =============================================================================
+# All functions below operate on plain numpy / pandas inputs. No GPU, no internal
+# state, no dependency on the fit/data structures of evaluate_portfolio. Inputs:
+#
+#   daily_returns : 1D numeric series or array of arithmetic daily returns
+#   weights_df    : DataFrame indexed by date with one column per asset
+#   AF            : annualization factor (252 for daily, 52 for weekly, etc.)
+#
+# All return scalars, pandas Series, or pandas DataFrames as documented.
+
+
+def _to_1d_float(daily_returns):
+    """Coerce to 1D float64 numpy array, dropping NaN."""
+    x = np.asarray(pd.Series(daily_returns).dropna().to_numpy(), dtype=float).ravel()
+    return x
+
+
+def cagr_geometric(daily_returns, AF):
+    """Compound annual growth rate from a daily-returns series.
+
+    cagr = prod(1 + r_t) ** (AF / T) - 1
+    """
+    x = _to_1d_float(daily_returns)
+    T = x.size
+    if T == 0:
+        return float("nan")
+    final = float(np.prod(1.0 + x))
+    if final <= 0.0:
+        return float("nan")
+    return float(final ** (float(AF) / float(T)) - 1.0)
+
+
+def drawdown_series(daily_returns):
+    """Pointwise drawdown series d_t = equity_t / running_peak_t - 1.
+
+    Returns a pandas Series indexed identically to the input (when input is a
+    Series). All values in (-1, 0].
+    """
+    s = pd.Series(daily_returns).astype(float).fillna(0.0)
+    equity = (1.0 + s).cumprod()
+    peak = equity.cummax()
+    return equity / peak - 1.0
+
+
+def time_under_water(daily_returns):
+    """Maximum length of consecutive observations spent below the prior peak.
+
+    Returned as an integer count of observations (e.g. days, weeks).
+    """
+    dd = drawdown_series(daily_returns)
+    under = (dd < 0.0).astype(int).to_numpy()
+    if under.size == 0:
+        return 0
+    # Longest run of 1s.
+    max_run = 0
+    cur_run = 0
+    for v in under:
+        if v == 1:
+            cur_run += 1
+            if cur_run > max_run:
+                max_run = cur_run
+        else:
+            cur_run = 0
+    return int(max_run)
+
+
+def calmar_ratio(daily_returns, AF):
+    """Calmar = CAGR / |MaxDrawdown|. NaN if MaxDD is zero."""
+    cagr = cagr_geometric(daily_returns, AF)
+    max_dd = _max_drawdown_from_series(_to_1d_float(daily_returns))
+    if not np.isfinite(max_dd) or max_dd == 0.0:
+        return float("nan")
+    return float(cagr / abs(max_dd))
+
+
+def downside_deviation(daily_returns, mar, AF):
+    """Annualised downside deviation relative to a minimum acceptable return (MAR).
+
+    mar is given in DAILY units (caller's responsibility). For an annual MAR of
+    rf, pass mar = (1+rf)**(1/AF) - 1.
+    """
+    x = _to_1d_float(daily_returns)
+    if x.size == 0:
+        return float("nan")
+    shortfall = np.minimum(x - float(mar), 0.0)
+    dd_daily = float(np.sqrt(np.mean(shortfall ** 2)))
+    return float(dd_daily * np.sqrt(float(AF)))
+
+
+def sortino_ratio(daily_returns, mar, AF):
+    """Annualised Sortino = (mean_daily - mar) * AF / downside_deviation_ann.
+
+    mar in DAILY units.
+    """
+    x = _to_1d_float(daily_returns)
+    if x.size == 0:
+        return float("nan")
+    dd_ann = downside_deviation(x, mar=mar, AF=AF)
+    if not np.isfinite(dd_ann) or dd_ann == 0.0:
+        return float("nan")
+    excess_ann = (float(np.mean(x)) - float(mar)) * float(AF)
+    return float(excess_ann / dd_ann)
+
+
+def var_historical(daily_returns, level):
+    """Historical Value-at-Risk at the given level (e.g. level=0.05 = 95% VaR).
+
+    Returned as a non-negative loss magnitude. NaN if no data.
+    """
+    x = _to_1d_float(daily_returns)
+    if x.size == 0:
+        return float("nan")
+    q = float(np.quantile(x, float(level)))
+    return float(-q) if q < 0 else 0.0
+
+
+def cvar_historical(daily_returns, level):
+    """Historical Conditional VaR (expected shortfall) at the given level.
+
+    Returned as a non-negative loss magnitude.
+    """
+    x = _to_1d_float(daily_returns)
+    if x.size == 0:
+        return float("nan")
+    q = float(np.quantile(x, float(level)))
+    tail = x[x <= q]
+    if tail.size == 0:
+        return float("nan")
+    m = float(np.mean(tail))
+    return float(-m) if m < 0 else 0.0
+
+
+def rolling_sharpe(daily_returns, window, AF):
+    """Rolling annualised Sharpe over a window of observations.
+
+    Returns a pandas Series aligned to the input index (NaN for the first
+    window-1 entries). Risk-free rate is assumed zero — pass excess returns
+    in if you need otherwise.
+    """
+    s = pd.Series(daily_returns).astype(float)
+    mu = s.rolling(int(window)).mean()
+    sd = s.rolling(int(window)).std(ddof=1)
+    sharpe = (mu / sd) * np.sqrt(float(AF))
+    return sharpe
+
+
+def effective_n_holdings(weights_df):
+    """Effective number of holdings per date: 1 / sum(w_i^2).
+
+    Inverse Herfindahl. Returns a pandas Series indexed by date.
+    """
+    W = pd.DataFrame(weights_df).astype(float).fillna(0.0)
+    denom = (W ** 2).sum(axis=1)
+    out = pd.Series(np.where(denom > 0, 1.0 / denom, np.nan), index=W.index, name="effective_n")
+    return out
+
+
+def cash_exposure(holdings_df):
+    """Cash residual per date: 1 - sum(abs(w_i)).
+
+    Returns a pandas Series indexed by date. Can be negative if the portfolio
+    is over-allocated (which shouldn't happen under no_leverage=True).
+    """
+    H = pd.DataFrame(holdings_df).astype(float).fillna(0.0)
+    return pd.Series(1.0 - H.abs().sum(axis=1), index=H.index, name="cash")
+
+
+def turnover_series(holdings_df):
+    """One-way turnover per rebalance: 0.5 * sum |w_t - w_{t-1}|.
+
+    Returns a pandas Series aligned to the input index. First row is NaN
+    (no prior weights).
+    """
+    H = pd.DataFrame(holdings_df).astype(float).fillna(0.0)
+    diff = H.diff().abs().sum(axis=1) * 0.5
+    diff.iloc[0] = np.nan
+    diff.name = "turnover_one_way"
+    return diff
+
+
+def regime_conditional_stats(daily_returns, regime_labels, AF):
+    """Per-regime annualised stats for a daily-returns series.
+
+    Both inputs must be pandas Series indexed by the same dates. The function
+    inner-joins on the index, groups by regime label, and computes mu/sigma/
+    sharpe/n_obs per regime.
+
+    Returns a DataFrame with one row per regime label and columns:
+        n_obs, mu_ann, sigma_ann, sharpe_ann
+    """
+    s_ret = pd.Series(daily_returns).astype(float)
+    s_reg = pd.Series(regime_labels)
+    df = pd.concat({"r": s_ret, "z": s_reg}, axis=1).dropna()
+    if df.empty:
+        return pd.DataFrame(columns=["n_obs", "mu_ann", "sigma_ann", "sharpe_ann"])
+
+    rows = []
+    for z, g in df.groupby("z"):
+        x = g["r"].to_numpy(dtype=float)
+        if x.size == 0:
+            continue
+        mu_d = float(np.mean(x))
+        sd_d = float(np.std(x, ddof=1)) if x.size > 1 else float("nan")
+        mu_ann = mu_d * float(AF)
+        sigma_ann = sd_d * float(np.sqrt(float(AF))) if np.isfinite(sd_d) else float("nan")
+        sharpe = (mu_ann / sigma_ann) if (np.isfinite(sigma_ann) and sigma_ann > 0) else float("nan")
+        rows.append({"regime": z, "n_obs": int(x.size), "mu_ann": mu_ann,
+                     "sigma_ann": sigma_ann, "sharpe_ann": sharpe})
+    out = pd.DataFrame(rows).set_index("regime").sort_index()
+    return out
+
+
+def enrich_summary(summary, daily_returns, AF, mar=0.0):
+    """Augment an existing summary dict with extended portfolio analytics.
+
+    Adds (without overwriting existing keys):
+        cagr_geom, calmar, sortino, downside_dev_ann,
+        var_95, cvar_95, var_99, cvar_99,
+        time_under_water
+
+    Returns a new dict (does not mutate input).
+    """
+    out = dict(summary or {})
+
+    daily = pd.Series(daily_returns).astype(float)
+
+    add = {
+        "cagr_geom":         cagr_geometric(daily, AF=AF),
+        "calmar":            calmar_ratio(daily, AF=AF),
+        "sortino":           sortino_ratio(daily, mar=float(mar), AF=AF),
+        "downside_dev_ann":  downside_deviation(daily, mar=float(mar), AF=AF),
+        "var_95":            var_historical(daily, level=0.05),
+        "cvar_95":           cvar_historical(daily, level=0.05),
+        "var_99":            var_historical(daily, level=0.01),
+        "cvar_99":           cvar_historical(daily, level=0.01),
+        "time_under_water":  time_under_water(daily),
+    }
+    for k, v in add.items():
+        if k not in out:
+            out[k] = v
+    return out

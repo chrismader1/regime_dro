@@ -27,7 +27,9 @@ prices = pd.read_csv("my_prices.csv", index_col=0, parse_dates=True)
 CONFIG = {
     "RSLDS": [{"config": "[g,v]", "n_regimes": 6, "dim_latent": 2}],
     "DATA":       {"start_dt": "2017", "end_dt": None},
-    "REBAL":      {"min_lookback_days": 55, "max_lookback_days": 1260},
+    "REBAL":      {"min_lookback": 11, "max_lookback": 252,
+                   "rebalance_period": 4, "freq": "W-FRI",
+                   "regdro_rebal_method": "periodic"},
     "PORTFOLIO":  {"risk_budget": 0.20, "risk_free_rate": 0.0, "max_cash": 0.0,
                    "max_pos_size": 0.05, "no_shorting": True, "no_leverage": True,
                    "sigma_shrinkage_lambda": 0.1, "delta_name": "bootstrap_np",

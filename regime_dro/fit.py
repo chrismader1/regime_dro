@@ -199,8 +199,8 @@ def fit_regime_dro(data, params, G):
             log_seg = xp.log1p(R_seg)
             mu_est  = xp.expm1(log_seg.mean(axis=0) * AF)
 
-        min_obs = int(params.get("min_lookback_days", 21))
-        max_lb  = int(params.get("max_lookback_days", 1260))
+        min_obs = int(params.get("min_lookback", 21))
+        max_lb  = int(params.get("max_lookback", 1260))
         lam_shr = float(params.get("sigma_shrinkage_lambda", 0.0))
 
         import numpy as _np
