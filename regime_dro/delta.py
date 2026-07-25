@@ -16,9 +16,18 @@ def _rng_from_params(params):
 
 
 def _sqrtm_psd(A, eps=1e-12):
+    """Symmetric PSD square root.
+
+    `eps` clamps negative eigenvalues arising from round-off; it is NOT added
+    to the positive ones. Adding it (the previous behaviour) inflates every
+    eigenvalue by eps/(2*sqrt(lambda)), which at daily-return scale
+    (variances ~1e-4) exceeds the Gelbrich trace term itself and drove
+    wasserstein2_gaussian to return exactly 0. Clamping preserves the same
+    protection against indefiniteness without the bias.
+    """
     vals, vecs = xp.linalg.eigh(0.5 * (A + A.T))
-    vals = xp.clip(vals, 0.0, None)
-    return (vecs * xp.sqrt(vals + eps)) @ vecs.T
+    vals = xp.clip(vals, float(eps), None) if eps else xp.clip(vals, 0.0, None)
+    return (vecs * xp.sqrt(vals)) @ vecs.T
 
 
 def wasserstein2_gaussian(mu1, Sigma1, mu2, Sigma2, eps=1e-12):
@@ -26,10 +35,21 @@ def wasserstein2_gaussian(mu1, Sigma1, mu2, Sigma2, eps=1e-12):
     Gelbrich formula: W2^2(N(mu1,S1), N(mu2,S2)) =
       ||mu1-mu2||^2 + tr(S1 + S2 - 2 (S2^{1/2} S1 S2^{1/2})^{1/2})
     """
+    Sigma1 = xp.atleast_2d(xp.asarray(Sigma1, dtype=float))
+    Sigma2 = xp.atleast_2d(xp.asarray(Sigma2, dtype=float))
     dmu2 = float(xp.dot(mu1 - mu2, mu1 - mu2))
-    S2h = _sqrtm_psd(Sigma2, eps=eps)
+
+    # Scalar case: the matrix route is exact but loses all precision to
+    # round-off when variances are ~1e-4 (daily returns), so use the closed
+    # form W2^2 = (m1-m2)^2 + (s1-s2)^2 directly.
+    if Sigma1.shape == (1, 1) and Sigma2.shape == (1, 1):
+        s1 = float(xp.sqrt(max(float(Sigma1[0, 0]), 0.0)))
+        s2 = float(xp.sqrt(max(float(Sigma2[0, 0]), 0.0)))
+        return float(xp.sqrt(max(dmu2 + (s1 - s2) ** 2, 0.0)))
+
+    S2h = _sqrtm_psd(Sigma2, eps=0.0)
     mid = S2h @ Sigma1 @ S2h
-    midh = _sqrtm_psd(mid, eps=eps)
+    midh = _sqrtm_psd(mid, eps=0.0)
     trpart = float(xp.trace(Sigma1 + Sigma2 - 2.0 * midh))
     w2_sq = max(dmu2 + trpart, 0.0)
     return float(xp.sqrt(w2_sq))

@@ -62,6 +62,53 @@ def map_labels_to_calendar(z_ser: pd.Series, cal: pd.DatetimeIndex) -> np.ndarra
     return z_cal.to_numpy(dtype="float64")
 
 
+def posterior_frame_from_segments(df_seg, security, model):
+    """Per (security, model), a date-indexed DataFrame with columns
+    z, p1, m1, m2 (and z_target if present), sorted by date."""
+    m = (df_seg["security"].astype(str).str.strip() == str(security).strip()) & \
+        (df_seg["model"].astype(str).str.strip() == str(model).strip())
+    sub = df_seg.loc[m]
+    if len(sub) == 0:
+        return None
+    cols = ["z", "p1", "m1", "m2"] + (["z_target"] if "z_target" in sub.columns else [])
+    out = sub[["date"] + cols].copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"]).sort_values("date").set_index("date")
+    for c in cols:
+        out[c] = _num_series(out[c])
+    return out
+
+
+def map_frame_to_calendar(frame: pd.DataFrame, cal: pd.DatetimeIndex) -> pd.DataFrame:
+    """Map a date-indexed frame to a trading calendar, column by column, with
+    the same forward-fill mechanics as map_labels_to_calendar."""
+    data = {c: map_labels_to_calendar(frame[c], cal) for c in frame.columns}
+    return pd.DataFrame(data, index=pd.DatetimeIndex(cal))
+
+
+def regime_summary_from_results(df_res, security, model, asof):
+    """Latest window-level regime summary with
+    window_end <= asof for (security, model). Returns dict with keys
+    m1_bar, m2_bar, Q1, Q2, lambda1, window_end -- or None."""
+    m = (df_res["security"].astype(str).str.strip() == str(security).strip()) & \
+        (df_res["model"].astype(str).str.strip() == str(model).strip())
+    sub = df_res.loc[m].copy()
+    if len(sub) == 0:
+        return None
+    sub["window_end"] = pd.to_datetime(sub["window_end"], errors="coerce")
+    sub = sub.dropna(subset=["window_end"]).sort_values("window_end")
+    sub = sub[sub["window_end"] <= pd.to_datetime(asof)]
+    if len(sub) == 0:
+        return None
+    row = sub.iloc[-1]
+    return {
+        "m1_bar": float(row["m1_bar"]), "m2_bar": float(row["m2_bar"]),
+        "Q1": float(row["Q1"]), "Q2": float(row["Q2"]),
+        "lambda1": float(row["lambda1"]),
+        "window_end": row["window_end"],
+    }
+
+
 def snap_start_prev(cal: pd.DatetimeIndex, start_dt):
     """
     If start_dt is not on the union calendar, return the closest date

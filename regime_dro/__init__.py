@@ -102,3 +102,54 @@ from regime_dro.context import (
 from regime_dro.pipeline import (
     run_regdro,
 )
+
+from regime_dro.radius import (
+    g_certainty,
+    g_inverse,
+    pi_dagger,
+    separations,
+    pooled_moments,
+    pooling_cost,
+    regime_radius_path,
+    standard_radius,
+    assignment_entropy,
+)
+
+from regime_dro.calibration import (
+    CalibrationMap,
+    fit_platt,
+    fit_temperature,
+    fit_isotonic,
+    choose_recalibration,
+    reliability_curve,
+    ece,
+    calibration_pass,
+)
+
+from regime_dro.covariance import (
+    ledoit_wolf_cov,
+    cov_to_corr,
+    corr_to_cov,
+    nearest_psd,
+    corr_argmax_buckets,
+    corr_soft_blend,
+    mixture_variance_diag,
+    assemble_sigma,
+)
+
+from regime_dro.optimizer import (
+    solve_optimizer_l1,
+)
+
+from regime_dro.schema import (
+    validate_posterior_artifacts,
+    REQUIRED_RESULTS_COLS_POSTERIOR,
+    REQUIRED_SEGMENTS_COLS_POSTERIOR,
+    VALID_REGIME_MODELS,
+)
+
+from regime_dro.artifacts import (
+    posterior_frame_from_segments,
+    map_frame_to_calendar,
+    regime_summary_from_results,
+)
