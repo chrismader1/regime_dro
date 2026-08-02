@@ -29,7 +29,9 @@ def asnumpy_strict(a, dtype=None, order=None):
     if dtype is not None:
         out = out.astype(dtype, copy=False)
     if order in ("C", "F"):
-        out = _np.array(out, dtype=out.dtype, order=order, copy=False)
+        # numpy >= 2: array(copy=False) raises when a copy is unavoidable;
+        # asarray copies only if needed, in every numpy version
+        out = _np.asarray(out, dtype=out.dtype, order=order)
     return out
 
 

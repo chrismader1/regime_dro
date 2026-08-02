@@ -54,10 +54,18 @@ def map_labels_to_calendar(z_ser: pd.Series, cal: pd.DatetimeIndex) -> np.ndarra
     z = pd.Series(z_ser).copy()
     z.index = pd.to_datetime(z.index, errors="coerce")
     z = z[~z.index.isna()].sort_index()
+    # as-of semantics: an observation whose date is absent from the target
+    # calendar still forward-fills onto later calendar dates (reindex+ffill
+    # would silently drop it). NaN values are dropped first so they are
+    # filled over, preserving NaN only before the first seen label.
+    z = z.dropna()
+    z = z[~z.index.duplicated(keep="last")]
 
     cal = pd.DatetimeIndex(cal)
+    if len(z) == 0:
+        return np.full(len(cal), np.nan)
 
-    z_cal = z.reindex(cal).ffill()
+    z_cal = z.reindex(cal, method="ffill")
 
     return z_cal.to_numpy(dtype="float64")
 
@@ -70,6 +78,11 @@ def posterior_frame_from_segments(df_seg, security, model):
     sub = df_seg.loc[m]
     if len(sub) == 0:
         return None
+    if "config" in sub.columns and sub["config"].astype(str).str.strip().nunique() > 1:
+        raise ValueError(
+            f"posterior_frame_from_segments: multiple configs for "
+            f"({security!r}, {model!r}); filter df_seg to one config upstream "
+            f"(duplicate dates would corrupt the calendar mapping).")
     cols = ["z", "p1", "m1", "m2"] + (["z_target"] if "z_target" in sub.columns else [])
     out = sub[["date"] + cols].copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce")

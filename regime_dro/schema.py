@@ -86,8 +86,9 @@ def _validate_segments_df(df_seg: pd.DataFrame) -> None:
 #   Q1, Q2         : per-regime innovation variances (daily)
 #   lambda1        : fraction of the training window assigned to regime 1
 #
-# delta_star / delta_tilde / c(lambda) / pi_dagger are computed downstream
-# (regime_dro.radius) from these summaries; they are never stored.
+# delta_star / delta_tilde / c(lambda) / the branch distances and per-stock
+# thresholds tau_i are computed downstream (regime_dro.radius) from these
+# summaries; they are never stored.
 
 REQUIRED_RESULTS_COLS_POSTERIOR = (
     "security", "model", "config", "n_regimes", "dim_latent",
@@ -101,6 +102,16 @@ REQUIRED_SEGMENTS_COLS_POSTERIOR = (
 VALID_REGIME_MODELS = ("rslds", "slds", "arhmm")
 
 
+def _valid_model_label(lbl):
+    """A model label is valid iff it is a regime-model class, or a named
+    configuration of one: '<class>_<suffix>' (e.g. 'rslds_factor1',
+    'rslds_fund1' -- two selected configurations of the same class running
+    side by side as separate model keys)."""
+    lbl = str(lbl).strip()
+    return any(lbl == c or lbl.startswith(c + "_")
+               for c in VALID_REGIME_MODELS)
+
+
 def _validate_results_df_posterior(df_res: pd.DataFrame) -> None:
     if df_res is None or len(df_res) == 0:
         raise ValueError("results csv: empty DataFrame.")
@@ -110,10 +121,12 @@ def _validate_results_df_posterior(df_res: pd.DataFrame) -> None:
             f"results csv: missing required columns {missing}. "
             f"Required: {list(REQUIRED_RESULTS_COLS_POSTERIOR)}. Found: {list(df_res.columns)}"
         )
-    bad_models = set(df_res["model"].astype(str).str.strip()) - set(VALID_REGIME_MODELS)
+    bad_models = {m for m in df_res["model"].astype(str).str.strip()
+                  if not _valid_model_label(m)}
     if bad_models:
         raise ValueError(f"results csv: unknown models {sorted(bad_models)}; "
-                         f"valid: {list(VALID_REGIME_MODELS)}")
+                         f"valid: {list(VALID_REGIME_MODELS)} or "
+                         f"'<class>_<suffix>' configurations of them")
     for col in ("m1_bar", "m2_bar", "Q1", "Q2", "lambda1", "score"):
         v = pd.to_numeric(df_res[col], errors="coerce")
         if v.isna().any():
@@ -139,10 +152,12 @@ def _validate_segments_df_posterior(df_seg: pd.DataFrame) -> None:
             f"segments parquet: missing required columns {missing}. "
             f"Required: {list(REQUIRED_SEGMENTS_COLS_POSTERIOR)}. Found: {list(df_seg.columns)}"
         )
-    bad_models = set(df_seg["model"].astype(str).str.strip()) - set(VALID_REGIME_MODELS)
+    bad_models = {m for m in df_seg["model"].astype(str).str.strip()
+                  if not _valid_model_label(m)}
     if bad_models:
         raise ValueError(f"segments parquet: unknown models {sorted(bad_models)}; "
-                         f"valid: {list(VALID_REGIME_MODELS)}")
+                         f"valid: {list(VALID_REGIME_MODELS)} or "
+                         f"'<class>_<suffix>' configurations of them")
     p1 = pd.to_numeric(df_seg["p1"], errors="coerce")
     if p1.isna().any():
         raise TypeError("segments parquet['p1'] contains non-numeric values.")

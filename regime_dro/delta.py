@@ -47,9 +47,9 @@ def wasserstein2_gaussian(mu1, Sigma1, mu2, Sigma2, eps=1e-12):
         s2 = float(xp.sqrt(max(float(Sigma2[0, 0]), 0.0)))
         return float(xp.sqrt(max(dmu2 + (s1 - s2) ** 2, 0.0)))
 
-    S2h = _sqrtm_psd(Sigma2, eps=0.0)
+    S2h = _sqrtm_psd(Sigma2, eps=float(eps))
     mid = S2h @ Sigma1 @ S2h
-    midh = _sqrtm_psd(mid, eps=0.0)
+    midh = _sqrtm_psd(mid, eps=float(eps))
     trpart = float(xp.trace(Sigma1 + Sigma2 - 2.0 * midh))
     w2_sq = max(dmu2 + trpart, 0.0)
     return float(xp.sqrt(w2_sq))
@@ -98,6 +98,34 @@ def sliced_w2_empirical(X, Y, n_proj=256, rng=None, U=None):
         diff = XU - YU
         w2_sq = xp.mean(diff * diff)
         return float(xp.sqrt(xp.maximum(w2_sq, 0.0)))
+
+
+def w2_empirical_gaussian_1d(x, m=None, Q=None):
+    """Gaussianity misspecification slack (design, Gaussianity paragraph):
+    the one-dimensional W2 distance between the empirical distribution of a
+    sample and the fitted (or supplied) Gaussian, via the quantile
+    representation Eq. (quantilew2),
+
+        W2^2 = int_0^1 (F_emp^{-1}(u) - F_N^{-1}(u))^2 du,
+
+    evaluated at the plotting positions u_i = (i - 1/2)/n, where the
+    empirical quantile function is the order statistic x_(i). When m / Q are
+    omitted they are fitted to the sample (mean, ddof-1 variance).
+    """
+    from scipy.special import ndtri
+    v = np.asarray(x, dtype=float).ravel()
+    v = v[np.isfinite(v)]
+    n = v.size
+    if n < 2:
+        return np.nan
+    if m is None:
+        m = float(np.mean(v))
+    if Q is None:
+        Q = float(np.var(v, ddof=1))
+    s = float(np.sqrt(max(float(Q), 0.0)))
+    u = (np.arange(n) + 0.5) / n
+    gq = float(m) + s * ndtri(u)
+    return float(np.sqrt(np.mean((np.sort(v) - gq) ** 2)))
 
 
 def _mbb_indices(T: int, m: int, L: int, rng=None) -> np.ndarray:
@@ -153,7 +181,7 @@ def bootstrap_np_block_delta(
         i2 = _mbb_indices(T, n, int(block_len), rng=rng)
         X1 = pool[xp.asarray(i1, dtype=xp.int64)]
         X2 = pool[xp.asarray(i2, dtype=xp.int64)]
-        dists[b] = sliced_w2_empirical(X1, X2, n_proj=int(n_proj), rng=None, U=U)
+        dists[b] = sliced_w2_empirical(X1, X2, n_proj=int(n_proj), rng=rng, U=U)
 
     return float(scale * xp.quantile(dists, 1.0 - float(alpha)))
 

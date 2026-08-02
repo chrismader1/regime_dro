@@ -22,6 +22,7 @@ from regime_dro.context import (
     make_solver_cfg_from_CONFIG,
     gross_exp_on_window,
     make_index_union,
+    make_index_regdro_periodic,
     pnl_with_delay_and_cost,
     period_ends,
 )

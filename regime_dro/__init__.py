@@ -18,6 +18,7 @@ from regime_dro.delta import (
     sliced_w2_empirical,
     bootstrap_np_block_delta,
     bootstrap_gaussian_block_delta,
+    w2_empirical_gaussian_1d,
 )
 
 from regime_dro.optimizer import (
@@ -104,15 +105,29 @@ from regime_dro.pipeline import (
 )
 
 from regime_dro.radius import (
-    g_certainty,
-    g_inverse,
-    pi_dagger,
     separations,
     pooled_moments,
     pooling_cost,
+    ambiguity_bounds,
+    mixture_w2_distances,
+    mixture_branch_distances,
+    mixture_minmax_distances,
+    w2_empirical_mixture_1d,
+    split_alpha,
+    calibrate_tau,
+    branch_component,
+    realized_miss_frequency,
+    occupancy,
+    confident_win,
+    q_cutoff,
     regime_radius_path,
     standard_radius,
+    product_wedge,
     assignment_entropy,
+    # legacy (previous revision; superseded by the branch rule)
+    g_certainty,
+    g_inverse,
+    pi_dagger,
 )
 
 from regime_dro.calibration import (

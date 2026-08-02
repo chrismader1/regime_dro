@@ -18,8 +18,11 @@ except Exception:
 # =============================================================================
 
 def _paired_diff(x, y):
-    d = xp.asarray(x, float) - xp.asarray(y, float)
-    mask = xp.isfinite(d)
+    # numpy explicitly: scipy.stats rejects cupy arrays, and these tests
+    # are CPU-side regardless of whether the fit path used a GPU
+    from regime_dro.arrays import asnumpy_strict
+    d = asnumpy_strict(x, float) - asnumpy_strict(y, float)
+    mask = np.isfinite(d)
     d = d[mask]
     return d, int(d.size)
 
@@ -313,7 +316,9 @@ def bootstrap_sharpe_diff(x, y, AF, n_boot=2000, block_len=None, seed=0, alpha=0
         diff                — point estimate SR_x - SR_y (annualised)
         ci_low, ci_high     — percentile CI on the difference
         p_two_sided         — fraction of bootstrap diffs more extreme than 0
-        p_x_greater         — fraction of bootstrap diffs <= 0
+        p_x_greater         — one-sided bootstrap p-value for H1: SR_x > SR_y
+                              (fraction of centred bootstrap diffs >= the
+                              point estimate)
         block_len_used
         n_boot
         T
@@ -364,7 +369,7 @@ def bootstrap_sharpe_diff(x, y, AF, n_boot=2000, block_len=None, seed=0, alpha=0
     # bootstrap: shift bootstrap diffs by -mean(diff_boot) under the null.
     centred = valid - float(np.mean(valid))
     p_two = float(np.mean(np.abs(centred) >= abs(diff_point)))
-    p_grt = float(np.mean(centred >= diff_point)) if diff_point >= 0 else float(np.mean(centred >= -abs(diff_point)))
+    p_grt = float(np.mean(centred >= diff_point))
 
     return dict(
         diff=float(diff_point),
@@ -519,7 +524,8 @@ def hypothesis_tests(results_dict, tests, alpha=0.05):
             print(f"   H0: mean({A}_vol_breach - {B}_vol_breach) = 0")
             print(f"   H1: mean({A}_vol_breach - {B}_vol_breach) < 0")
             T, P = paired_onesided_less(x, y)
-            mean_diff = (x - y).mean()
+            _d = np.asarray(x, float) - np.asarray(y, float)
+            mean_diff = float(np.mean(_d[np.isfinite(_d)])) if np.isfinite(_d).any() else float("nan")
             print(f"   Test: Paired t-test on differences ({A} - {B})")
             print(f"   alpha={alpha:.2f}, t={T:.3f}, p(one-sided)={P:.4g}, mean diff={mean_diff:.6f}")
             if P < alpha:
@@ -567,7 +573,8 @@ def hypothesis_tests(results_dict, tests, alpha=0.05):
             print(f"   H0: mean({A}_sharpe - {B}_sharpe) ≤ 0")
             print(f"   H1: mean({A}_sharpe - {B}_sharpe) > 0")
             T, P = superiority_paired(x, y)
-            mean_diff = (x - y).mean()
+            _d = np.asarray(x, float) - np.asarray(y, float)
+            mean_diff = float(np.mean(_d[np.isfinite(_d)])) if np.isfinite(_d).any() else float("nan")
             print(f"   alpha={alpha:.2f}, t={T:.3f}, p(one-sided)={P:.4g}, mean diff={mean_diff:.6f}")
             if P < alpha:
                 print(f"   Conclusion: REJECT H0 at {int((1 - alpha) * 100)}% confidence → {A} Sharpe is SUPERIOR to {B}.")

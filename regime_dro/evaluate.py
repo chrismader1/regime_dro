@@ -391,7 +391,8 @@ def turnover_series(holdings_df):
     """
     H = pd.DataFrame(holdings_df).astype(float).fillna(0.0)
     diff = H.diff().abs().sum(axis=1) * 0.5
-    diff.iloc[0] = np.nan
+    if len(diff):
+        diff.iloc[0] = np.nan
     diff.name = "turnover_one_way"
     return diff
 

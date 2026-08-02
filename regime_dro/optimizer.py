@@ -45,7 +45,8 @@ def psd_factor_LtL(Sigma, eps):
     except Exception:
         S = _np.asarray(Sigma)
 
-    S = _np.array(S, dtype=_np.float64, order="C", copy=False)
+    # numpy >= 2: array(copy=False) raises when a copy is unavoidable
+    S = _np.asarray(S, dtype=_np.float64, order="C")
 
     S_sym = 0.5 * (S + S.T)
     try:
@@ -67,7 +68,9 @@ def solve_optimizer(mu, Sigma, delta, config, verbose=False):
     rho = float(config["risk_budget"])
     eps = float(config["epsilon_sigma"])
 
-    Sigma_np = asnumpy_strict(Sigma, dtype=_np.float64, order="C")
+    # private copy: never mutate the caller's Sigma, and stay numpy-2 safe
+    Sigma_np = _np.array(asnumpy_strict(Sigma, dtype=_np.float64, order="C"),
+                         dtype=_np.float64, order="C", copy=True)
     _np.nan_to_num(Sigma_np, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
     try:
@@ -76,8 +79,6 @@ def solve_optimizer(mu, Sigma, delta, config, verbose=False):
             Sigma_np = _cp.asnumpy(Sigma_np)
     except Exception:
         pass
-
-    Sigma_np = _np.array(Sigma_np, dtype=_np.float64, order="C", copy=False)
 
     assert not hasattr(Sigma_np, "__cuda_array_interface__"), "Sigma_np is still CUDA-backed!"
     assert isinstance(Sigma_np, _np.ndarray), f"Sigma_np type={type(Sigma_np)}"
@@ -154,9 +155,10 @@ def solve_optimizer_l1(mu, Sigma, eps_vec, config, verbose=False,
     if not _np.all(_np.isfinite(eps_np)) or _np.any(eps_np < 0.0):
         raise ValueError("eps_vec must be finite and nonnegative.")
 
-    Sigma_np = asnumpy_strict(Sigma, dtype=_np.float64, order="C")
+    # private copy: never mutate the caller's Sigma, and stay numpy-2 safe
+    Sigma_np = _np.array(asnumpy_strict(Sigma, dtype=_np.float64, order="C"),
+                         dtype=_np.float64, order="C", copy=True)
     _np.nan_to_num(Sigma_np, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-    Sigma_np = _np.array(Sigma_np, dtype=_np.float64, order="C", copy=False)
 
     L = psd_factor_LtL(Sigma_np, eps)
     mu_np = asnumpy_strict(mu, dtype=_np.float64)

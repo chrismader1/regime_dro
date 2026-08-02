@@ -48,7 +48,9 @@ def regdro_decision_context(
     if not keep:
         return False, [], {}, pd.DataFrame(), np.array([]), np.array([]), np.zeros((0, 0)), np.zeros((0, 0)), np.zeros(0, dtype=bool)
 
-    cap_applies = bool(G.get("no_shorting", False)) and np.isfinite(G.get("max_pos_size", np.nan)) and (G.get("max_pos_size", 0.0) > 0.0)
+    _mp = G.get("max_pos_size", None)
+    cap_applies = (bool(G.get("no_shorting", False)) and _mp is not None
+                   and np.isfinite(float(_mp)) and float(_mp) > 0.0)
 
     if cap_applies:
         c_max = float(G.get("max_cash", 0.0))
@@ -124,7 +126,7 @@ def make_index_rebal(
     freq: str,
 ):
     """Fixed-period rebalancing dates on the INTERSECTION calendar.
-    Builds a target grid at `freq` (e.g. "B", "W-FRI", "M"), takes every
+    Builds a target grid at `freq` (e.g. "B", "W-FRI", "BME"), takes every
     `rebalance_period`-th point, then snaps each target date to the last
     available date on `intersection_index` that is <= the target."""
     idx_req = pd.DatetimeIndex(
