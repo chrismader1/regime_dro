@@ -71,7 +71,12 @@ def solve_optimizer(mu, Sigma, delta, config, verbose=False):
     # private copy: never mutate the caller's Sigma, and stay numpy-2 safe
     Sigma_np = _np.array(asnumpy_strict(Sigma, dtype=_np.float64, order="C"),
                          dtype=_np.float64, order="C", copy=True)
-    _np.nan_to_num(Sigma_np, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    if not _np.all(_np.isfinite(Sigma_np)):
+        raise ValueError(
+            "Sigma contains non-finite entries -- zeroing them (the old "
+            "behavior) makes the affected asset's variance ~0 and the "
+            "optimizer concentrates in exactly the asset whose risk model "
+            "failed. Fix the covariance input instead.")
 
     try:
         import cupy as _cp
@@ -158,7 +163,12 @@ def solve_optimizer_l1(mu, Sigma, eps_vec, config, verbose=False,
     # private copy: never mutate the caller's Sigma, and stay numpy-2 safe
     Sigma_np = _np.array(asnumpy_strict(Sigma, dtype=_np.float64, order="C"),
                          dtype=_np.float64, order="C", copy=True)
-    _np.nan_to_num(Sigma_np, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    if not _np.all(_np.isfinite(Sigma_np)):
+        raise ValueError(
+            "Sigma contains non-finite entries -- zeroing them (the old "
+            "behavior) makes the affected asset's variance ~0 and the "
+            "optimizer concentrates in exactly the asset whose risk model "
+            "failed. Fix the covariance input instead.")
 
     L = psd_factor_LtL(Sigma_np, eps)
     mu_np = asnumpy_strict(mu, dtype=_np.float64)

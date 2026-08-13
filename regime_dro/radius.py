@@ -379,7 +379,7 @@ def q_cutoff(dkmin_bar, d_std, tau, delta_tilde):
     return num / den
 
 
-def regime_radius_path(pi_max_path, m1, m2, Q1, Q2, tau, e_alpha_e,
+def regime_radius_path(pi1_path, m1, m2, Q1, Q2, tau, e_alpha_e,
                        n_u=2048, n_x=4001):
     """The revised regime-DRO radius path (Sec. regvsstd):
 
@@ -389,7 +389,10 @@ def regime_radius_path(pi_max_path, m1, m2, Q1, Q2, tau, e_alpha_e,
     (calibrated by calibrate_tau at budget alpha_z on the select span) and
     the per-date distances computed exactly per Eq. (dkexact).
 
-    pi_max_path : (T,) posterior-maximum path (pi_min = 1 - pi_max)
+    pi1_path : (T,) TRUE regime-1 posterior path. The mixture of
+        Eq. (dkexact) is F_pi = pi1*Phi_1 + (1-pi1)*Phi_2; passing the
+        posterior maximum instead mirrors the mixture whenever regime 2 is
+        the majority, which is wrong for Q1 != Q2.
     m1, m2, Q1, Q2 : per-regime conditional moments (Assumption 3: scalars)
     e_alpha_e   : estimation component at level alpha_e (alpha/2 split)
 
@@ -397,14 +400,15 @@ def regime_radius_path(pi_max_path, m1, m2, Q1, Q2, tau, e_alpha_e,
     majority/minority distances (D_kmax, D_kmin), pi_min, occupancy q and
     realized miss frequency.
     """
-    pmax = np.clip(np.asarray(pi_max_path, dtype=float), 0.5, 1.0)
-    pmin = np.where(np.isfinite(pmax), 1.0 - pmax, np.nan)
+    p1 = np.clip(np.asarray(pi1_path, dtype=float), 0.0, 1.0)
+    pmin = np.where(np.isfinite(p1), np.minimum(p1, 1.0 - p1), np.nan)
 
-    # distances depend on pi only; cache on rounded pi_max for the path
-    Dkmax = np.full(pmax.shape, np.nan)
-    Dkmin = np.full(pmax.shape, np.nan)
+    # cache on the rounded TRUE regime-1 weight; mixture_branch_distances
+    # selects the majority branch internally
+    Dkmax = np.full(p1.shape, np.nan)
+    Dkmin = np.full(p1.shape, np.nan)
     cache = {}
-    flatp = pmax.ravel()
+    flatp = p1.ravel()
     fc, fa = Dkmax.ravel(), Dkmin.ravel()
     for i, p in enumerate(flatp):
         if not np.isfinite(p):

@@ -188,10 +188,16 @@ def bootstrap_np_block_delta(
 
 def bootstrap_gaussian_block_delta(
     R, alpha=0.05, B=100, block_len=55, eps=1e-9, seed=None, n_sample=512,
-    standardize=False):
+    standardize=False, ann=1.0):
     """
     Moving-block bootstrap; distance is Gelbrich W2 between the Gaussian fitted to
     the reference pool and the Gaussian fitted to each block-resample.
+
+    ann : annualization factor, applied MOMENT-CONSISTENTLY inside each
+    resample distance -- the mean difference scales by ann, the covariance
+    difference by sqrt(ann) (i.e. covariance x ann) -- matching the
+    annualized Gelbrich distance between annualized moment estimates.
+    ann=1.0 keeps daily units.
     """
     X = xp.asarray(R, dtype=float)
     T, d = int(X.shape[0]), int(X.shape[1])
@@ -221,6 +227,7 @@ def bootstrap_gaussian_block_delta(
     n = int(max(2, n_sample))
     rng = np.random.default_rng(seed)
 
+    _a = float(ann)
     deltas = xp.empty(int(B), dtype=float)
     for b in range(int(B)):
         idx = _mbb_indices(T, n, int(block_len), rng=rng)
@@ -228,7 +235,9 @@ def bootstrap_gaussian_block_delta(
         mub = xp.mean(Xb, axis=0)
         Xbc = Xb - mub
         Sb  = (Xbc.T @ Xbc) / max(n - 1, 1)
-        deltas[b] = wasserstein2_gaussian(mu0, S0, mub, Sb, float(eps))
+        # annualized moments: mean x ann, covariance x ann (std x sqrt(ann))
+        deltas[b] = wasserstein2_gaussian(_a * mu0, _a * S0,
+                                          _a * mub, _a * Sb, float(eps))
 
     return float(scale * xp.quantile(deltas, 1.0 - float(alpha)))
 
@@ -293,6 +302,10 @@ def compute_delta(kappa, mu_est, Sigma=None, R=None, params=None):
         L           = int((params or {}).get("block_len", 10))
         n_sample    = int((params or {}).get("n_sample", 252))
         standardize = bool((params or {}).get("standardize", True))
+        # NOTE: the np route annualizes the whole daily radius by sqrt(AF)
+        # (no closed-form moment split exists for the projected empirical
+        # W2). It is therefore NOT on the same scale as the gaussian route
+        # and is not used by the production configuration.
         delta_daily = bootstrap_np_block_delta(
             R, n_proj=n_proj, B=B, block_len=L, alpha=alpha, seed=seed,
             n_sample=n_sample, standardize=standardize, U=params.get("U", None))
@@ -307,9 +320,13 @@ def compute_delta(kappa, mu_est, Sigma=None, R=None, params=None):
         L           = int((params or {}).get("block_len", 10))
         n_sample    = int((params or {}).get("n_sample", 252))
         standardize = bool((params or {}).get("standardize", True))
-        delta_daily = bootstrap_gaussian_block_delta(
+        # moment-consistent annualization: mean error scales by AF, sigma
+        # error by sqrt(AF). The d = 1 case is exact via the scalar route;
+        # for d > 1 the same map is applied to the Gelbrich components
+        # inside the bootstrap (see bootstrap_gaussian_block_delta ann arg).
+        delta_ann = bootstrap_gaussian_block_delta(
             R, alpha=alpha, B=B, block_len=L, eps=eps, seed=seed,
-            n_sample=n_sample, standardize=standardize)
-        return float(np.sqrt(AF)) * float(delta_daily)
+            n_sample=n_sample, standardize=standardize, ann=float(AF))
+        return float(delta_ann)
 
     raise ValueError(f"Unknown delta_method='{method}'")
