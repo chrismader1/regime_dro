@@ -187,7 +187,7 @@ def bootstrap_np_block_delta(
 
 
 def bootstrap_gaussian_block_delta(
-    R, alpha=0.05, B=100, block_len=55, eps=1e-9, seed=None, n_sample=512,
+    R, alpha=0.05, B=100, block_len=55, eps=1e-9, seed=None, n_sample=None,
     standardize=False, ann=1.0):
     """
     Moving-block bootstrap; distance is Gelbrich W2 between the Gaussian fitted to
@@ -224,7 +224,9 @@ def bootstrap_gaussian_block_delta(
     Xc  = X - mu0
     S0  = (Xc.T @ Xc) / max(T - 1, 1)
 
-    n = int(max(2, n_sample))
+    # n_sample = None resamples at the reference-pool length T: e is the
+    # sampling error of the estimator actually used
+    n = int(max(2, n_sample if n_sample is not None else T))
     rng = np.random.default_rng(seed)
 
     _a = float(ann)
@@ -318,7 +320,8 @@ def compute_delta(kappa, mu_est, Sigma=None, R=None, params=None):
         eps         = float((params or {}).get("epsilon_sigma", 1e-9))
         seed        = (params or {}).get("seed", None)
         L           = int((params or {}).get("block_len", 10))
-        n_sample    = int((params or {}).get("n_sample", 252))
+        _ns         = (params or {}).get("n_sample", None)
+        n_sample    = (int(_ns) if _ns is not None else None)
         standardize = bool((params or {}).get("standardize", True))
         # moment-consistent annualization: mean error scales by AF, sigma
         # error by sqrt(AF). The d = 1 case is exact via the scalar route;
