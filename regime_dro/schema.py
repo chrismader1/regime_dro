@@ -71,7 +71,7 @@ def _validate_segments_df(df_seg: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # segments parquet (per security x model x date):
 #   security, model, config, n_regimes, dim_latent, date,
-#   z   : argmax label (kept for the hard-assignment ablation and the
+#   z   : argmax label (kept for the hard-assignment MAP variant and the
 #         variant-2 covariance buckets)
 #   p1  : posterior probability of regime 1 at the date (recalibration is
 #         applied downstream; this column is the raw model posterior)
