@@ -163,8 +163,14 @@ def fit_temperature_pit(p1, m1, m2, Q1, Q2, y_next, log_bounds=(-4.0, 4.0)):
     {G^theta(y_next)} and the uniform, over log theta in `log_bounds`.
     The per-regime means and variances enter G unchanged; only the weights
     are tempered. Returns (CalibrationMap('pit_temperature', (theta,)),
-    dict(theta, cvm, cvm_raw, n))."""
-    p = np.asarray(p1, dtype=float)
+    dict(theta, cvm, cvm_raw, n)).
+
+    The fit clips exactly as CalibrationMap.apply does. Without the clip the
+    temperature would be optimised against a map that is never used: apply()
+    clips to [_EPS, 1-_EPS] BEFORE tempering, so raw posteriors below _EPS are
+    floored there and then tempered, and the fitted theta would be tuned to a
+    tail the applied map cannot reach."""
+    p = _clip01(p1)
 
     def obj(logT):
         return cvm_uniform(pit_values(temperature_posterior(p, np.exp(logT)),

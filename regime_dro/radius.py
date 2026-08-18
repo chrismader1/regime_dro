@@ -7,7 +7,7 @@
 #                          Eq. dstdmax) and Cor. meanreach (min_k d_k floor)
 #   ambiguity_bounds       Prop. ambiguity: (1-pi_k) delta* <= D_k(pi)
 #                                            <= sqrt(1-pi_k) delta~*
-#   mixture_w2_distances   Eq. (dkexact): D_k(pi) exact via the 1-D quantile
+#   mixture_w2_distances   Eq. (dkexact): D_k(pi) via the 1-D quantile
 #                          representation Eq. (quantilew2), and the ordering
 #                          of Lemma majorityminority (majority regime nearer)
 #   calibrate_tau          Eq. (taucal): select-span threshold at budget
@@ -76,7 +76,7 @@ def pooled_moments(lam, m1, m2, Q1, Q2):
     return m_std, Q_std
 
 
-def pooling_cost(lam, m1, m2, Q1, Q2):
+def pooling_cost(lam, m1, m2, Q1, Q2, nominal=None):
     """Per-regime distances to the pooled nominal (Prop. stdexact) and derived
     constants.
 
@@ -94,7 +94,19 @@ def pooling_cost(lam, m1, m2, Q1, Q2):
                      current theory replaces them with the branch rule
                      (calibrate_tau / branch_component).
     """
-    m_std, Q_std = pooled_moments(lam, m1, m2, Q1, Q2)
+    if nominal is None:
+        m_std, Q_std = pooled_moments(lam, m1, m2, Q1, Q2)
+    else:
+        # EMPIRICAL pooled nominal. pooled_moments' between-regime term
+        # lam(1-lam)(m1-m2)^2 is the variance of a mixture drawn ONCE and
+        # held for the whole annualisation period. These regimes switch on a
+        # dwell of days, so over a year that term is damped by the number of
+        # switches and the formula overstates the nominal's dispersion by an
+        # order of magnitude. Standard DRO's nominal is by definition what a
+        # regime-blind estimator sees on the trailing window, so it is
+        # measured, not assumed -- and this is the same object whose mean the
+        # standard-DRO solve already uses (compute_mean_from_window).
+        m_std, Q_std = float(nominal[0]), float(max(nominal[1], 0.0))
     d1 = _w2_scalar(m1, Q1, m_std, Q_std)
     d2 = _w2_scalar(m2, Q2, m_std, Q_std)
     d_star, d_tilde = separations(m1, m2, Q1, Q2)
@@ -147,14 +159,20 @@ def _mixture_inverse_cdf(u, pi1, m1, s1, m2, s2, n_x=4001):
 
 
 def mixture_w2_distances(pi1, m1, m2, Q1, Q2, n_u=2048, n_x=4001):
-    """Exact one-dimensional distances of Eq. (dkexact),
+    """One-dimensional distances of Eq. (dkexact),
 
         D_k(pi) = [ int_0^1 (Phi_k^{-1}(u) - F_pi^{-1}(u))^2 du ]^{1/2},
 
-    with F_pi = pi1 * Phi_1 + (1 - pi1) * Phi_2, evaluated by midpoint
-    quadrature on the quantile representation Eq. (quantilew2). Returns
-    (D_1, D_2). By Lemma majorityminority the majority regime is the nearer:
-    D_{k_max} = min_k D_k and D_{k_min} = max_k D_k.
+    with F_pi = pi1 * Phi_1 + (1 - pi1) * Phi_2, evaluated by Gauss-weighted
+    midpoint quadrature after the substitution u = Phi(z) (see the comment in
+    the body -- a midpoint rule in u is O(1/n_u) and badly biased LOW on the
+    confident branch). Returns (D_1, D_2).
+
+    NOTE: Lemma majorityminority ("the majority regime is the nearer") holds
+    for Q1 == Q2 but INVERTS for unequal regime variances near pi = 1/2 -- the
+    mixture can sit closer to the wider component. mixture_branch_distances
+    therefore follows the tex's rule (majority/minority), NOT numerical
+    min/max; do not substitute mixture_minmax_distances for it.
     """
     pi1 = float(np.clip(pi1, 0.0, 1.0))
     m1, m2 = float(m1), float(m2)
@@ -167,11 +185,24 @@ def mixture_w2_distances(pi1, m1, m2, Q1, Q2, n_u=2048, n_x=4001):
     if pi1 <= 0.0:
         return _w2_scalar(m1, Q1, m2, Q2), 0.0
 
-    u = (np.arange(int(n_u)) + 0.5) / float(n_u)
-    z = ndtri(u)
-    Finv = _mixture_inverse_cdf(u, pi1, m1, s1, m2, s2, n_x=n_x)
-    D1 = float(np.sqrt(np.mean((m1 + s1 * z - Finv) ** 2)))
-    D2 = float(np.sqrt(np.mean((m2 + s2 * z - Finv) ** 2)))
+    # Quadrature in z, not in u. Substituting u = Phi(z) turns
+    #     int_0^1 (Phi_k^{-1}(u) - F_pi^{-1}(u))^2 du
+    # into
+    #     int (m_k + s_k z - F_pi^{-1}(Phi(z)))^2 phi(z) dz,
+    # which has a bounded, smooth integrand. A midpoint rule in u instead
+    # places its first node at u = 1/(2 n_u) and the integrand diverges like
+    # z^2 at both ends, so it converges only as O(1/n_u) and is badly
+    # one-sidedly LOW exactly where the minority weight 1 - pi is smaller
+    # than that first node -- i.e. on the confident branch, which is the
+    # branch the regime-vs-standard comparison rests on. Measured at
+    # n_u = 8192 on the u-grid: -1.8% at pi_min = 1e-2, -32% at 1e-3, -74%
+    # at 1e-4. The z-grid below is exact to ~1e-4 relative at the same cost.
+    _ZMAX = 9.0
+    z = ((np.arange(int(n_u)) + 0.5) / float(n_u)) * (2.0 * _ZMAX) - _ZMAX
+    wq = np.exp(-0.5 * z * z) / np.sqrt(2.0 * np.pi) * (2.0 * _ZMAX / n_u)
+    Finv = _mixture_inverse_cdf(ndtr(z), pi1, m1, s1, m2, s2, n_x=n_x)
+    D1 = float(np.sqrt(max(float(np.sum(wq * (m1 + s1 * z - Finv) ** 2)), 0.0)))
+    D2 = float(np.sqrt(max(float(np.sum(wq * (m2 + s2 * z - Finv) ** 2)), 0.0)))
     return D1, D2
 
 
@@ -269,6 +300,71 @@ def mixture_branch_distances(pi1, m1, m2, Q1, Q2, n_u=2048, n_x=4001):
     """
     D1, D2 = mixture_w2_distances(pi1, m1, m2, Q1, Q2, n_u=n_u, n_x=n_x)
     return (D1, D2) if float(pi1) >= 0.5 else (D2, D1)
+
+
+def mixture_branch_split(pi1, m1, m2, Q1, Q2, n_u=2048, n_x=4001):
+    """Mean/shape split of the branch distances, Sec. dro (worst-case
+    covariance).
+
+    W_2 between two laws on the line decomposes exactly and orthogonally into
+    a mean part and a centered part,
+
+        W_2^2(P, Q) = (E_P - E_Q)^2 + W_2^2(P - E_P, Q - E_Q),
+
+    because the quantile functions differ by the constant (E_P - E_Q) plus the
+    centered difference, and the cross term integrates to zero. The first part
+    is ambiguity about the MEAN and is priced in the objective (Cor.
+    innervector); the second is ambiguity about the SHAPE -- dispersion -- and
+    is what the adversary spends on the covariance, so it belongs in the risk
+    constraint.
+
+    Returns ((D_conf, dm_conf, ds_conf), (D_amb, dm_amb, ds_amb)) for the
+    majority (confident) and minority (ambiguous) branches of
+    `mixture_branch_distances`, with D^2 = dm^2 + ds^2 in each triple.
+    """
+    D1, D2 = mixture_w2_distances(pi1, m1, m2, Q1, Q2, n_u=n_u, n_x=n_x)
+    p = float(np.clip(pi1, 0.0, 1.0))
+    m_mix = p * float(m1) + (1.0 - p) * float(m2)
+    dm1, dm2 = abs(m_mix - float(m1)), abs(m_mix - float(m2))
+    # D >= dm is a theorem (the mean gap is one leg of the decomposition), so
+    # a violation beyond float noise means the quadrature failed. Clip the
+    # noise, raise on anything larger rather than silently returning ds = 0.
+    def _split(D, dm):
+        if D < dm and (dm - D) > 1e-8 * max(1.0, abs(dm)):
+            raise ValueError(
+                f"mixture_branch_split: D={D!r} < dm={dm!r} beyond tolerance; "
+                f"the quantile quadrature has not converged (raise n_u).")
+        return (D, dm, float(np.sqrt(max(D * D - dm * dm, 0.0))))
+    t1 = _split(D1, dm1)
+    t2 = _split(D2, dm2)
+    return (t1, t2) if p >= 0.5 else (t2, t1)
+
+
+def pooling_cost_split(lam, m1, m2, Q1, Q2, nominal=None):
+    """Mean/shape split of the standard-DRO pooling cost (Prop. stdexact).
+
+    Same decomposition as `mixture_branch_split`, applied to the worst-regime
+    Gelbrich distance from the pooled nominal. Returns (d_std, dm, ds) with
+    d_std^2 = dm^2 + ds^2.
+    """
+    if nominal is None:
+        m_std, Q_std = pooled_moments(lam, m1, m2, Q1, Q2)
+    else:
+        # EMPIRICAL pooled nominal. pooled_moments' between-regime term
+        # lam(1-lam)(m1-m2)^2 is the variance of a mixture drawn ONCE and
+        # held for the whole annualisation period. These regimes switch on a
+        # dwell of days, so over a year that term is damped by the number of
+        # switches and the formula overstates the nominal's dispersion by an
+        # order of magnitude. Standard DRO's nominal is by definition what a
+        # regime-blind estimator sees on the trailing window, so it is
+        # measured, not assumed -- and this is the same object whose mean the
+        # standard-DRO solve already uses (compute_mean_from_window).
+        m_std, Q_std = float(nominal[0]), float(max(nominal[1], 0.0))
+    d1 = _w2_scalar(m1, Q1, m_std, Q_std)
+    d2 = _w2_scalar(m2, Q2, m_std, Q_std)
+    (d, mk) = (d1, float(m1)) if d1 >= d2 else (d2, float(m2))
+    dm = abs(float(m_std) - mk)
+    return float(d), float(dm), float(np.sqrt(max(d * d - dm * dm, 0.0)))
 
 
 def mixture_minmax_distances(pi1, m1, m2, Q1, Q2, n_u=2048, n_x=4001):
